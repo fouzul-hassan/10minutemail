@@ -1,96 +1,183 @@
-import requests
-import re 
-import os
-import sys
+import urllib.request
 import time
-import html  # Import the html module for unescaping
+import json
 
-global file
-file = None
+BASE_URI = "https://10minutemail.com/"
+ENDPOINT_GETADDRESS = "session/address"
+ENDPOINT_RESETINTERVAL = "session/reset"
+ENDPOINT_GETMSGCOUNT = "messages/messageCount"
+ENDPOINT_GETMSG = "messages/messagesAfter/{0}"
 
-def usage():
-	print("Usage:")
-	print("\tpython %s" % sys.argv[0])
-	print("\tpython %s --save/-s Write/Save body,from,subject and date at file\n" % sys.argv[0])
-	sys.exit()
+FAKE_REQUEST_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36"
+}
 
-def main(path):
-	subjects = []
-	xc = 0
-	path = path
-	body = None
-	try:
-		argv = sys.argv[1]
-	except IndexError:
-		argv = ""
-	email_ = None
-	r = requests.get('https://10minutemail.net/')
-	email = re.findall(r'class="mailtext" value="(.*\@.+\.\w*)" />', r.content.decode(), re.I)
-	print("\033[1;31mYour email:\033[0m \033[3;33m" + email[0] + "\033[0m")
-	phps = re.findall(r'PHPSESSID=[a-zA-Z0-9]+', r.headers['Set-Cookie'], re.I)[0]
-	header  = "+-----------------------+------------------------+-----------------------+----------------------+\n"
-	header += "|\t\033[1;31mFrom\033[0m\t\t|\t\033[1;32mSubject\033[0m\t\t |\t\033[1;33mDate\033[0m\t\t |\t\033[1;34mBody\033[0m\t\t|"
-	header += "\n+-----------------------+------------------------+-----------------------+----------------------+"
-	print(header)
-	# 600 -> 60(seconds) x 10(minutes) 
-	for i in range(0, 600):
-		print(f"\nChecking for new emails... (Attempt {i+1}/600)", flush=True)  # Debug print
-		
-		a = requests.get('https://10minutemail.net/mailbox.ajax.php', headers={'Cookie': phps})
-		fields = re.findall(r'<td>(.*?)</td>', a.content.decode())
+# the page works with a 10-second-interval, so adjust that if necessary
+REQUEST_INTERVAL = 5
 
-		if not fields:
-			print("No new emails found.", flush=True)
-		else:
-			form = html.unescape(fields[0])  # Use html.unescape directly
-			subject = re.findall(r'>(.*?)<', fields[1], re.I)[0]
-			date = re.findall(r'>(.*?)<', fields[2], re.I)[0]
-			url = 'https://10minutemail.net/' + re.findall(r'href="(.+?)"', fields[1], re.I)[0]
-			
-			# find body	
-			def sender(url):
-				aa = requests.get(url, headers={'Cookie': phps})
-				b = re.findall(r'class="break-all mailinhtml">(.+?)<', aa.content.decode(), re.I)[0]
-				return b
 
-			# write body
-			if 'welcome' not in url and argv in ('--save', '-s'):
-				body = html.unescape(sender(url))
-				email_ = re.findall(r'([a-zA-Z0-9._-]+@[a-zA-Z.-_]+)', form, re.I)[0].replace('>', '').replace('<', '').replace('@', '_') + '.txt'
-				if os.path.exists(email_ if path == None else path):
-					with open(email_ if path == None else path, 'r+') as file:
-						data = file.read()
-						file.seek(0)
-						file.write('%s\nFrom: %s\nSubject: %s\nDate: %s\nBody: %s\n' % ("-"*50, form, subject, time.strftime("%H:%M:%S"), body))
-						file.truncate()
-				file = open('%s' % email_ if path == None else path, 'w')
-				file.write('%s\nFrom: %s\nSubject: %s\nDate: %s\nBody: %s\n' % ("-"*50, form, subject, time.strftime("%H:%M:%S"), body))
-			
-			# print subject one time
-			if subject not in subjects:
-				subjects.append(subject)
-				print('| \033[1;31m%s | \033[1;32m%s | \033[1;33m%s | \033[1;34m%s\033[0m\n' % (form, subject, date, email_ if path == None else path), flush=True)
-		
-		# wait 10 seconds 
-		time.sleep(10)
-	
-	if file != None:
-		file.close()
+def awaitContinueRequest(action="continue"):
+    input("Press Enter to " + action + "...\n")
+
+
+class TenMinuteMailGenerator(object):
+    """generates 10 minute mails from 10minutemail.com"""
+
+    def __init__(self):
+        self.SIDCookie = ""
+
+    def get10MinuteMail(self, simulate=False):
+        """gets a new email adress of 10minutemail
+
+        *Returns*: email address"""
+        if simulate != True:
+            req = urllib.request.Request(
+                "https://10minutemail.com/session/address",
+                headers=FAKE_REQUEST_HEADERS,
+            )
+
+            with urllib.request.urlopen(req) as response:
+                jsonResponse = response.read().decode("utf-8")
+                self.SIDCookie = response.info().get_all("Set-Cookie")[0]
+
+                return json.loads(jsonResponse)["address"]
+        else:
+            self.SIDCookie = (
+                "JSESSIONID=LIKd7IlHq0lhpTOsWJdPY; path=/; secure; HttpOnly"
+            )
+            return "r446338@mvrht.net"
+
+    def anyNewMessage(self, currentMessageCount):
+        """waits/checks for new messages as long as necessary
+        currentMessageCount: The current count of messages the new count of messages shall be compared with
+
+        *Returns*: new message count as int"""
+
+        totalPointCount = 3
+        pointCount = 1
+        totalWaitTime = 0
+
+        while True:
+            messageCount = json.loads(self.doApiRequest(ENDPOINT_GETMSGCOUNT))[
+                "messageCount"
+            ]
+
+            if messageCount > currentMessageCount:
+                print("\n> You got new mail! " + str(messageCount))
+                break
+            else:
+                print(
+                    "> Waiting for new mails.. currently "
+                    + str(messageCount)
+                    + " messages"
+                    + ("." * pointCount)
+                    + (" " * (totalPointCount - pointCount))
+                    + "\r",
+                    end="",
+                    flush=True,
+                )
+
+            time.sleep(REQUEST_INTERVAL)
+            totalWaitTime += REQUEST_INTERVAL
+
+            if totalWaitTime > 500:
+                print("> 500 seconds over.. requesting extension.")
+                self.renewInterval()
+                totalWaitTime = 0
+
+            # reset point count so we can get a smooth "animation"
+            if pointCount >= totalPointCount:
+                pointCount = 1
+            else:
+                pointCount += 1
+
+        return int(messageCount)
+
+    def getMessage(self, messageID):
+        """get message with given ID and return a json object with mail parameters
+        messageID: Message to load
+
+        *Returns*: message as json object"""
+
+        print("> Getting mail " + str(messageID))
+        message = self.doApiRequest(ENDPOINT_GETMSG.format(messageID), True)
+
+        # example:
+        # [{"read":false,"expanded":false,"forwarded":false,"repliedTo":false,"sentDate":"2022-06-19T20:37:33.000+00:00","sentDateFormatted":"Jun 19, 2022, 8:37:33 PM","sender":"sender@mail.de","from":"[Ljavax.mail.internet.InternetAddress;@1dd3705c","subject":"Test-Mail","bodyPlainText":"\r\n\r\n\r\nDies ist eine Test-Mail - Yay.\r\n","bodyHtmlContent":"<html>\r\n  <head>\r\n\r\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\r\n  </head>\r\n  <body>\r\n    <p><br>\r\n    </p>\r\n  Dies ist eine Test-Mail - Yay.<br>\r\n    </div>\r\n</div>\r\n  </body>\r\n</html>\r\n","bodyPreview":"\r\n\r\n\r\n-------- Forwarded Message --------\r\nSubject","id":"10123386541204271300"}]
+        return json.loads(message)
+
+    def showMessage(self, json):
+        mailText = json[0]["bodyPlainText"]
+
+        if mailText == None:
+            mailText = json[0]["bodyHtmlContent"]
+
+        return (
+            "Sender: "
+            + json[0]["sender"]
+            + "\nSubject: "
+            + json[0]["subject"]
+            + "\nMessage: "
+            + mailText
+            + "\n"
+        )
+
+    def renewInterval(self):
+        """requests another 10 minutes to keep the mail address active"""
+
+        print("Sending renewal request..")
+        return self.doApiRequest(ENDPOINT_RESETINTERVAL, True)
+
+    def doApiRequest(self, apiEndpoint: str, printOkay: bool = False):
+        req = urllib.request.Request(
+            BASE_URI + apiEndpoint, headers=FAKE_REQUEST_HEADERS
+        )
+        req.add_header("Accept", "application/json, text/javascript, */*")
+        req.add_header("Connection", "keep-alive")
+
+        if self.SIDCookie != "":
+            req.add_header("cookie", self.SIDCookie)
+
+        with urllib.request.urlopen(req) as response:
+            message = response.read().decode("utf-8")
+
+        if printOkay and response.getcode() == 200:
+            print("> Request successful!")
+
+        if response.getcode() >= 400:
+            print("> Something went wrong!")
+
+        return message
+
 
 if __name__ == "__main__":
-	try:
-		try:
-			if '--save' in sys.argv[1] or '-s' in sys.argv[1]:
-				if sys.argv[1-2] in ('-s', '--save'):
-					usage()
-				main(sys.argv[1-2])
-		except IndexError:
-			main(path=None)
-	except Exception as error:
-		if file != None:
-			file.close()
-		sys.exit("[ERROR]: %s" % str(error))
-	except KeyboardInterrupt:
-		if file != None:
-			file.close()
-		sys.exit("[USER EXIT]: CTRL+c!!!")
+
+    awaitContinueRequest("generate a mail address")
+    Tenmmg = TenMinuteMailGenerator()
+
+    print("> Generating mail.. ")
+    print("> Generated mail: " + Tenmmg.get10MinuteMail())
+
+    messageId = 0
+    while True:
+        print(
+            "\n"
+            + "> Do you want to watch for new messages? Your choices: \n"
+            + "> [Y]es (json raw output) \n"
+            + "> [N]o (Ends script) \n"
+            + "> Yes but show me extracted sender, subject and [B]ody (plaintext version if available, otherwise html) \n",
+        )
+        option = input("> Your choice [Y, N, B]: ")
+
+        if option.lower().startswith("y"):
+            print(Tenmmg.getMessage(Tenmmg.anyNewMessage(messageId) - 1))
+        elif option.lower().startswith("b"):
+            print(
+                Tenmmg.showMessage(
+                    Tenmmg.getMessage(Tenmmg.anyNewMessage(messageId) - 1)
+                )
+            )
+        else:
+            break
+
+        messageId += 1
