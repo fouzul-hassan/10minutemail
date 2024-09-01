@@ -34,35 +34,42 @@ def main(path):
 	print(header)
 	# 600 -> 60(seconds) x 10(minutes) 
 	for i in range(0, 600):
+		print(f"\nChecking for new emails... (Attempt {i+1}/600)", flush=True)  # Debug print
+		
 		a = requests.get('https://10minutemail.net/mailbox.ajax.php', headers={'Cookie': phps})
 		fields = re.findall(r'<td>(.*?)</td>', a.content.decode())
-		form = html.unescape(fields[0])  # Use html.unescape directly
-		subject = re.findall(r'>(.*?)<', fields[1], re.I)[0]
-		date = re.findall(r'>(.*?)<', fields[2], re.I)[0]
-		url = 'https://10minutemail.net/' + re.findall(r'href="(.+?)"', fields[1], re.I)[0]
-		# find body	
-		def sender(url):
-			aa = requests.get(url, headers={'Cookie': phps})
-			b = re.findall(r'class="break-all mailinhtml">(.+?)<', aa.content.decode(), re.I)[0]
-			return b
 
-		# write body
-		if 'welcome' not in url and argv in ('--save', '-s'):
-			body = html.unescape(sender(url))
-			email_ = re.findall(r'([a-zA-Z0-9._-]+@[a-zA-Z.-_]+)', form, re.I)[0].replace('>', '').replace('<', '').replace('@', '_') + '.txt'
-			if os.path.exists(email_ if path == None else path):
-				with open(email_ if path == None else path, 'r+') as file:
-					data = file.read()
-					file.seek(0)
-					file.write('%s\nFrom: %s\nSubject: %s\nDate: %s\nBody: %s\n' % ("-"*50, form, subject, time.strftime("%H:%M:%S"), body))
-					file.truncate()
-			file = open('%s' % email_ if path == None else path, 'w')
-			file.write('%s\nFrom: %s\nSubject: %s\nDate: %s\nBody: %s\n' % ("-"*50, form, subject, time.strftime("%H:%M:%S"), body))
-		
-		# print subject one time
-		if subject not in subjects:
-			subjects.append(subject)
-			print('| \033[1;31m%s | \033[1;32m%s | \033[1;33m%s | \033[1;34m%s\033[0m\n' % (form, subject, date, email_ if path == None else path))
+		if not fields:
+			print("No new emails found.", flush=True)
+		else:
+			form = html.unescape(fields[0])  # Use html.unescape directly
+			subject = re.findall(r'>(.*?)<', fields[1], re.I)[0]
+			date = re.findall(r'>(.*?)<', fields[2], re.I)[0]
+			url = 'https://10minutemail.net/' + re.findall(r'href="(.+?)"', fields[1], re.I)[0]
+			
+			# find body	
+			def sender(url):
+				aa = requests.get(url, headers={'Cookie': phps})
+				b = re.findall(r'class="break-all mailinhtml">(.+?)<', aa.content.decode(), re.I)[0]
+				return b
+
+			# write body
+			if 'welcome' not in url and argv in ('--save', '-s'):
+				body = html.unescape(sender(url))
+				email_ = re.findall(r'([a-zA-Z0-9._-]+@[a-zA-Z.-_]+)', form, re.I)[0].replace('>', '').replace('<', '').replace('@', '_') + '.txt'
+				if os.path.exists(email_ if path == None else path):
+					with open(email_ if path == None else path, 'r+') as file:
+						data = file.read()
+						file.seek(0)
+						file.write('%s\nFrom: %s\nSubject: %s\nDate: %s\nBody: %s\n' % ("-"*50, form, subject, time.strftime("%H:%M:%S"), body))
+						file.truncate()
+				file = open('%s' % email_ if path == None else path, 'w')
+				file.write('%s\nFrom: %s\nSubject: %s\nDate: %s\nBody: %s\n' % ("-"*50, form, subject, time.strftime("%H:%M:%S"), body))
+			
+			# print subject one time
+			if subject not in subjects:
+				subjects.append(subject)
+				print('| \033[1;31m%s | \033[1;32m%s | \033[1;33m%s | \033[1;34m%s\033[0m\n' % (form, subject, date, email_ if path == None else path), flush=True)
 		
 		# wait 10 seconds 
 		time.sleep(10)
